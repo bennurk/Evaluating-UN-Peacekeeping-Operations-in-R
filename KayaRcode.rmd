@@ -1,0 +1,496 @@
+---
+title: "Untitled"
+output: pdf_document
+---
+
+
+```{r echo = T, results = 'hide', error=FALSE, warning=FALSE, message=FALSE}
+load("C:/Users/emrek/OneDrive/Desktop/bekaya-dataessay/raw-data/pko.RData")
+```
+
+```{r}
+head(pko)
+dim(pko)
+summary(pko)
+table(is.na(pko)) #60665 
+length(table(pko$conflict_ID)) #84 different conflict_ID
+pko[pko$brf_grc == max(na.omit(pko$brf_grc)),] #the highest fatality belongs to the conflict between Congo and Cobras.
+table(pko$ceasefire) #0:12452  1:9066
+pko[pko$pop_ln == min(na.omit(pko$pop_ln)),] #Comoros has the smallest population size
+table(pko$biased_intervention) #1: 744 
+table(pko$active_year) #1: 4034
+table(pko$regional_pko)
+
+
+```
+
+```{r}
+#Data preperation
+
+#Creating a new variable for the sum of Number of UN military troops and Number of UN police unites deployed, in thousands, lagged one month.
+
+pko$military_police_lag1000 <- pko$troop_lag1000 + pko$police_lag1000
+
+#Creating a dataset by using the variables I want to focus
+#Brf_grc for battle-related fatalities, ceasefire, biased_interventation, active_year and military_police_lag1000 for UN troops size variables 
+pko2 <- pko[,c(5,9,16,17,22)]
+summary(pko2)
+dim(pko2) #21518     
+pko2omit <- na.omit(pko2)
+summary(pko2omit)
+dim(pko2omit) #From 21518 to 19792 observations.
+
+
+mean(pko2omit[pko2omit$ceasefire==0,]$brf_grc) #10
+mean(pko2omit[pko2omit$ceasefire==1,]$brf_grc) #4
+
+mean(pko2omit[pko2omit$ceasefire==0,]$military_police_lag1000) #0.84
+mean(pko2omit[pko2omit$ceasefire==1,]$military_police_lag1000) #2
+```
+
+
+```{r}
+library(ggplot2)
+library(viridisLite)
+library(viridis)
+
+# to see the relationship between UN troops size and battle-related fatalities by ceasefire
+col_vec <- viridis(2, alpha = 0.5)
+
+# Why do we nest two ifelse statements?
+attend_lab <- ifelse(pko2omit$ceasefire == 1, 
+                     "Ceasefire exists",
+                     ifelse(pko2omit$ceasefire == 0, 
+                            "Ceasefire doesn't exist", NA)) 
+
+# instead of nesting two ifelse statements, we can also use case_when form dplyr 
+# attend_lab <- case_when(trump_rally$attendance == 1 ~ "did attend",
+#                         trump_rally$attendance == 0 ~ "did not attend",
+#                         TRUE ~ NA) # assign NA if trump_rally$attendance is not 1 or 0
+
+ggplot(data = pko2omit,  # data used for plotting
+       mapping = aes(x = pko2omit$military_police_lag1000, 
+                     y = pko2omit$brf_grc,
+                     color = attend_lab)
+       ) +
+  geom_jitter(
+    size = 2,
+    width = 0.25
+       ) + 
+  theme_minimal() + # change the appearance
+  labs(
+    x = "The UN troops size",
+    y = "Battle-related fatalities",
+    title = ""
+      ) + 
+  scale_color_manual(
+    name = "", 
+    values = c("Ceasefire exists" = col_vec[1], "Ceasefire doesn't exist" = col_vec[2])
+    )
+```
+
+```{r}
+#to check the correlations between the variables in order to have insights 
+
+cor(pko2omit$brf_grc,pko2omit$military_police_lag1000) #With the correlation=-0.01871248, it can be said that there is a weak negative relationship between Battle-related fatalities and the UN troops size. 
+
+data1 = subset(pko2omit, ceasefire == 1) #ceasefire exists
+data2 = subset(pko2omit, ceasefire == 0) #ceasefire doesn't exist
+
+cor(data1$military_police_lag1000, data1$brf_grc)  #-0.019
+
+cor(data2$military_police_lag1000, data2$brf_grc)  #-0.0107
+
+#Interestingly, when the ceasefire existss, there is no big change but the negative relationship gets a very little stronger. On the other hand, when there is no ceasefire between groups, the negative relationship between the groups gets weaker from -0.0187 to -0.0107.
+```
+
+```{r}
+library(stargazer)
+#Poisson
+poissonmodel1 <- glm(
+  brf_grc ~ military_police_lag1000, 
+  data = pko2omit,
+  family = "poisson"
+)
+
+poissonmodel2 <- glm(
+  brf_grc ~ military_police_lag1000 + ceasefire + military_police_lag1000 * ceasefire , 
+  data = pko2omit,
+  family = "poisson"
+)
+
+#negativebinomial
+library(MASS)
+nbmodel1 <- glm.nb(
+  brf_grc ~ military_police_lag1000, 
+  data = pko2omit,
+  control = glm.control(maxit = 100)
+)
+
+nbmodel2 <- glm.nb(
+  brf_grc ~ military_police_lag1000 + ceasefire,
+  data = pko2omit,
+  control = glm.control(maxit = 100)
+)
+
+nbmodel3 <- glm.nb(
+  brf_grc ~  military_police_lag1000 +ceasefire + biased_intervention + active_year, 
+  data = pko2omit,
+  control = glm.control(maxit = 100)
+)
+
+nbmodel4 <- glm.nb(
+  brf_grc ~ military_police_lag1000 +ceasefire + biased_intervention + active_year  + ceasefire * military_police_lag1000 , 
+  data = pko2omit,
+  control = glm.control(maxit = 200)
+)
+
+stargazer(nbmodel1,nbmodel2,nbmodel3,nbmodel4,
+          out = "table_lab.tex",
+          title="Regression Results", 
+          notes = "Evaluating UN Peacekeeping Operations",
+          intercept.bottom = TRUE,
+          align=TRUE, 
+          covariate.labels=c("Number of UN troops","Ceasefire", "Biased Intervention","Active Year",
+          "Number of UN Troops : Ceasefire"),
+          no.space=TRUE,
+          dep.var.labels = c("Battle-related fatalities"),
+          table.placement = "H",
+          type="text")
+```
+Akaike Inf. Crit. : The Akaike information criterion (AIC) is a mathematical method for evaluating how well a model fits the data it was generated from. The smaller the AIC value, the better the model fit.
+
+```{r}
+library(car)
+vif(nbmodel4) #multicollinearity check - doesn't exist
+```
+#Quantities of Interest
+
+Steps for Simulating Parameters (Estimation Uncertainty):
+
+Get the coefficients from the regression (gamma_hat)
+Get the variance-covariance matrix (V_hat)
+Set up a multivariate normal distribution N(gamma_hat,V_hat)
+Draw from the distribution nsim times
+
+```{r}
+nsim <- 1000
+
+# 1. get the coefficients
+gamma_hat <- coef(nbmodel4)
+
+# 2. Get the variance-covariance matrix
+V_hat <- vcov(nbmodel4)
+
+# 3. Set up a multivariate normal distribution N(gamma_hat, V_hat)
+# 4. Draw from the distribution nsim times
+S <- mvrnorm(nsim, gamma_hat, V_hat)
+
+```
+
+Next step: Set up interesting scenarios.
+
+The order of coefficients is:
+
+```{r}
+names(gamma_hat)
+```
+
+```{r}
+# create sequence for the continuous variable
+troops_seq <- seq(
+  min(nbmodel4$model$military_police_lag1000),
+  quantile(nbmodel4$model$military_police_lag1000, 0.95), 
+  length.out = 100
+)
+
+# set scenario
+scenario0 <- cbind(
+  1, # Intercept
+  troops_seq, # mean of military_police_lag1000
+  0, #ceasefire
+  mean(pko2omit$biased_intervention), #biased_intervention
+  1, #active year
+  troops_seq * 0 # military_police_lag1000:ceasefire
+)
+
+colnames(scenario0) <- names(gamma_hat)
+head(scenario0)
+
+```
+
+
+```{r}
+scenario1 <- scenario0
+
+# switch only the changing values
+# set scenario for ceasefire=1
+scenario1[, which(colnames(scenario1) == "ceasefire")] <- 1
+scenario1[, which(colnames(scenario1) == "military_police_lag1000:ceasefire")] <- troops_seq
+head(scenario1)
+```
+
+
+```{r}
+Xbeta0 <- S %*% t(scenario0)
+Xbeta1 <- S %*% t(scenario1)
+
+lambda0 <- exp(Xbeta0)
+lambda1 <- exp(Xbeta1)
+```
+
+
+```{r}
+theta <- nbmodel3$theta
+
+exp_0 <-
+  apply(lambda0, c(1, 2), function(x) {
+    mean(rnbinom(100, size = theta, mu = x))
+  })
+
+exp_1 <-
+  apply(lambda1, c(1, 2), function(x) {
+    mean(rnbinom(100, size = theta, mu = x))
+  })
+```
+
+
+```{r}
+quants_0 <- t(apply(exp_0, 2, quantile, c(0.025, 0.5, 0.975)))
+quants_1 <- t(apply(exp_1, 2, quantile, c(0.025, 0.5, 0.975)))
+```
+
+```{r}
+par(las = 1)
+# segment plot-
+
+plot(
+  troops_seq,
+  quants_0[, "50%"],
+  type = "n",
+  ylim = c(0, 150),
+  ylab ="Battle-related Fatalities",
+  xlab ="The UN Troops size",
+  bty = "n",
+  main = "Expected Battle-related Fatalities 
+  over the range of The UN Troops size by Ceasefire",
+) 
+
+segments(
+  x0 = troops_seq, x1 = troops_seq,
+  y1 = quants_0[, "97.5%"], y0 = quants_0[, "2.5%"],
+  col = viridis(2, 0.5)[1],
+  lwd = 2
+)
+points(troops_seq, quants_0[, 2], col = viridis(2, 0.5)[1], pch = 20)
+
+segments(
+  x0 = troops_seq, x1 = troops_seq,
+  y1 = quants_1[, "97.5%"], y0 = quants_1[, "2.5%"],
+  col = viridis(2, 0.5)[2],
+  lwd = 2
+)
+points(troops_seq, quants_1[, 2], col = viridis(2, 0.5)[2], pch = 20)
+
+# Add a "histogram" of actual X1-values.
+axis(
+  1,
+  at = pko2omit$military_police_lag1000,
+  col.ticks = "gray30",
+  labels = FALSE,
+  tck = 0.02
+)
+
+legend(
+  "topright",
+  legend = c(
+    "Median & 95% CI:",
+    "Ceasefire doesn't exit",
+    "Ceasefire exists",
+    ""
+  ),
+  col = c(
+    "white",
+    viridis(2, 0.5)
+  ),
+  lty = "solid",
+  lwd = 2,
+  pch = 20,
+  pt.cex = 2,
+  bty = "n"
+)
+
+```
+
+```{r}
+# polygon plot
+plot(
+  troops_seq,
+  quants_0[, "50%"],
+  type = "n",
+  ylim = c(0, 150),
+  ylab ="Battle-related Fatalities",
+  xlab ="The UN Troops size",
+  bty = "n",
+  main = "Expected Battle-related Fatalities 
+  over the range of The UN Troops size by Ceasefire",
+) 
+
+polygon(
+  c(rev(troops_seq), troops_seq),
+  c(rev(quants_0[, "97.5%"]), quants_0[, "2.5%"]),
+  col = viridis(2, 0.2)[1],
+  border = NA
+)
+
+polygon(
+  c(rev(troops_seq), troops_seq),
+  c(rev(quants_1[, "97.5%"]), quants_1[, "2.5%"]),
+  col = viridis(2, 0.2)[2],
+  border = NA
+)
+
+lines(troops_seq, quants_0[, 1], lwd = 2, lty = "dashed", col = viridis(2, 0.5)[3])
+lines(troops_seq, quants_0[, 2], lwd = 0.5, lty = "dashed", col = viridis(2, 0.5)[3])
+
+lines(troops_seq, quants_1[, 1], lwd = 2, lty = "dotted", col = viridis(2, 0.5)[2])
+lines(troops_seq, quants_1[, 2], lwd = 0.5, lty = "dashed", col = viridis(2, 0.5)[2])
+
+# Add a "histogram" of actual X1-values.
+axis(
+  1,
+  at = pko2omit$military_police_lag1000,
+  col.ticks = "gray30",
+  labels = FALSE,
+  tck = 0.02
+)
+
+legend(
+  "topright",
+  legend = c(
+    "Median & 95% CI:",
+    "Ceasefire doesn't exit",
+    "Ceasefire exists"
+  ),
+  col = c(
+    "white",
+    viridis(2, 0.5)
+  ),
+  lty = c(NA, "dashed", "dotted"),
+  lwd = c(NA, 2, 2, 2),
+  # pch = c(NA, 15, NA, 15, NA, 15),
+  pt.cex = 2,
+  bty = "n"
+)
+```
+
+```{r}
+FD <- exp_0 - exp_1
+quants_FD <- t(apply(FD, 2, quantile, c(0.025, 0.5, 0.975)))
+
+plot(
+  troops_seq,
+  quants_FD[, "50%"],
+  type = "n",
+  ylim = c(min(quants_FD[, "2.5%"]), max(quants_FD[, "97.5%"])),
+  ylab = "Difference in Expected Battle-related Fatalities",
+  xlab = "The UN Troops Size",
+  bty = "n",
+  las = 1,
+  main = "Difference in expected number of Battle-related Fatalities 
+  over the range of The UN Troops size by Ceasefire",
+)
+segments(
+  x0 = troops_seq, x1 = troops_seq,
+  y1 = quants_FD[, "97.5%"], y0 = quants_FD[, "2.5%"],
+  col = viridis(1, 0.5)
+)
+points(troops_seq, quants_FD[, 2], col = viridis(1, 0.5), pch = 20)
+
+abline(h = 0, lty = "dashed")
+
+```
+
+```{r}
+FD <- cbind(
+  exp_0[, 97.5] - exp_0[, 2.5],
+  exp_1[, 97.5] - exp_1[, 2.5]
+)
+
+quants_FD <- t(apply(FD, 2, quantile, c(0.025, 0.5, 0.975)))
+
+plot(
+  y = 1:2,
+  x = quants_FD[, "50%"],
+  type = "n",
+  xlab = "Difference in Expected Battle-related Fatalities",
+  ylab = "",
+  xlim = range(pretty(c(
+    min(quants_FD[, "2.5%"]), max(quants_FD[, "97.5%"])
+  ))),
+  ylim = c(1, 2.6),
+  bty = "n",
+  las = 1,
+  axes = F,
+  main = "Difference in expected number of Battle-related Fatalities 
+  of The UN Troops by Ceasefire"
+)
+
+segments(
+  x0 = quants_FD[, "2.5%"],
+  x1 = quants_FD[, "97.5%"],
+  y0 = c(1.2, 1.8),
+  col = viridis(5, 0.5)
+)
+points(
+  x = quants_FD[, "50%"],
+  y = c(1.2, 1.8),
+  pch = 19
+)
+axis(
+  2,
+  at =  c(1.2, 1.8),
+  las = 1,
+  labels = c("Ceasefire=0", "Ceasefire=1"),
+  tick = F,
+  line = F,
+  hadj = 0.23
+)
+axis(1)
+abline(v = 0, lty = "dashed")
+```
+
+```{r}
+#Robustness Check
+
+#Outlier elimination
+pkomodel <- nbmodel4 <- glm.nb(
+  brf_grc ~  ceasefire + military_police_lag1000 + active_year +  biased_intervention  + military_police_lag1000 * ceasefire, 
+  data = pko2omit,
+  control = glm.control(maxit = 100)
+)
+
+pkomodel2 <- glm.nb(brf_grc ~  ceasefire + military_police_lag1000 + active_year + biased_intervention  + military_police_lag1000 * ceasefire, 
+        data = pkomodel$model[!rstandard(pkomodel) > 2, ], control = glm.control(maxit = 200), )
+
+stargazer(pkomodel,pkomodel2,
+          out = "table_lab.tex",
+          title="Regression Results", 
+          notes = "Evaluating UN Peacekeeping Operations",
+          intercept.bottom = TRUE,
+          align=TRUE, 
+          covariate.labels=c("Ceasefire", "Number of UN troops", "Active Year", "Biased Intervention",
+          "Number of UN Troops : Ceasefire"),
+          no.space=TRUE,
+          dep.var.labels = c("Battle-related fatalities"),
+          table.placement = "H",
+          type="text")
+
+summary(pkomodel)
+```
+
+
+
+
+
+
